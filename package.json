@@ -1,0 +1,25 @@
+{
+  "name": "unravel-docs",
+  "version": "1.0.0",
+  "description": "Welcome to the comprehensive documentation suite for **Unravel** — the client-side, zero-trust tabular data ingestion, rule validation, and normalization platform for Excel (XLSX), CSV, and TSV files.",
+  "main": "index.js",
+  "scripts": {
+    "docs:dev": "vitepress dev",
+    "docs:build": "vitepress build",
+    "docs:preview": "vitepress preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/unfoundry/unravel-docs.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/unfoundry/unravel-docs/issues"
+  },
+  "homepage": "https://github.com/unfoundry/unravel-docs#readme",
+  "devDependencies": {
+    "vitepress": "^1.6.4"
+  }
+}
