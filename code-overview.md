@@ -1,38 +1,83 @@
 # Code Architecture & Function Overview
 
-This document provides a comprehensive technical overview of Unravel's codebase, architecture, and primary JavaScript / Python functions.
+This document provides a comprehensive technical overview of Unravel's codebase, multi-repository architecture, and primary JavaScript / Python functions.
 
 ---
 
-## 🗂️ File Structure
+## Repository Architecture
+
+Unravel is divided into three completely decoupled repositories:
+
+```mermaid
+graph TD
+    subgraph UI ["unravel-ui (Frontend)"]
+        Runner["Runner App (index.html)"]
+        Studio["Dev Studio (builder/)"]
+        CoreJS["Core Engine (app.js, builder.js, security.js, validators.js)"]
+    end
+
+    subgraph Service ["unravel-service (Backend)"]
+        API["FastAPI App (unravel_service.py)"]
+        DecryptionEngine["XLSX Decryptor (msoffcrypto)"]
+        HeadlessEngine["Headless Normalizer Pipeline"]
+        AdminUI["Admin Portal (templates/admin_dashboard.html)"]
+        DB[(SQLite unravel.db)]
+    end
+
+    subgraph Docs ["unravel-docs (Documentation)"]
+        VitePress["VitePress Static Portal"]
+        Pages["GitHub Pages (.github/workflows/deploy.yml)"]
+    end
+
+    Runner -->|"Optional Decrypt"| DecryptionEngine
+    Studio -.->|"Export / Test"| Runner
+    API --> DB
+    AdminUI --> API
+```
 
 ```
-unravel/
-├── app/
+repos/
+├── unravel-ui/                        # Standalone 100% Client-Side Web Application
 │   ├── index.html                     # Primary Ingestion Wizard UI
 │   ├── builder/
 │   │   └── index.html                 # Dev Studio Schema Builder UI
+│   ├── manifest.webmanifest           # PWA installation manifest
+│   ├── sw.js                          # Service Worker for offline execution
 │   └── assets/
-│       ├── css/
-│       │   └── style.css              # Main application stylesheet & design tokens
+│       ├── css/style.css              # Main application stylesheet & design tokens
 │       ├── js/
 │       │   ├── app.js                 # Core Wizard Engine (UnravelApp)
 │       │   ├── builder.js             # Visual Schema Builder (UnravelBuilder)
 │       │   ├── security.js            # Web Crypto AES-GCM Browser Vault (UnravelSecurity)
 │       │   └── validators.js          # Rule Validation Engine (UnravelValidator)
 │       ├── sample-data/               # Sample schemas, starter templates, test files
+│       ├── icons/                     # Standard SVG & PNG application icons
 │       └── vendor/                    # Self-contained offline JS/CSS libraries
-├── docs/                              # Project documentation suite
-└── services/
-    ├── unravel_service.py             # Unified FastAPI Decryption Gateway, Parser, Broker & Admin Console
-    └── unravel.db                     # SQLite database repository for project schemas & audit logs
+│
+├── unravel-service/                   # Headless Microservice & Companion Gateway
+│   ├── unravel_service.py             # FastAPI Decryption Gateway, Normalizer & Admin API
+│   ├── templates/                     # Jinja2 HTML templates for status & admin console
+│   │   ├── base.html                  # Master Bootswatch Lumen layout
+│   │   ├── status.html                # Public health & status page
+│   │   └── admin_dashboard.html       # Schema CRUD & telemetry console
+│   ├── assets/                        # Local CSS/JS vendor assets for admin dashboard
+│   ├── unravel.db                     # SQLite database repository for project schemas & audit logs
+│   ├── requirements.txt               # Python package dependencies
+│   ├── Dockerfile                     # Container definition
+│   └── docker-compose.yml             # Local production composition
+│
+└── unravel-docs/                      # Documentation Portal
+    ├── index.md                       # VitePress landing homepage
+    ├── .vitepress/config.mjs          # VitePress configuration & local search setup
+    ├── public/                        # Logo, favicon, and .nojekyll flag
+    └── *.md                           # User, developer, deployment & security guides
 ```
 
 ---
 
-## 1. `app/assets/js/app.js` (`UnravelApp`)
+## 1. `unravel-ui/assets/js/app.js` (`UnravelApp`)
 
-The main wizard controller managing the 8-step pipeline, spreadsheet parsing, cell transformations, validation execution, interactive grid rendering, and exports.
+The main wizard controller managing the pipeline, spreadsheet parsing, row filters, calculated fields, cell transformations, validation execution, interactive grid rendering, and exports.
 
 ### State & Properties
 - `this.currentStep`: Active wizard step index (1 through 8).
@@ -40,6 +85,7 @@ The main wizard controller managing the 8-step pipeline, spreadsheet parsing, ce
 - `this.rawWorkbook`: Parsed SheetJS workbook instance in browser RAM.
 - `this.rawSheetData`: 2D array of extracted worksheet/file rows before offset.
 - `this.cleanRecords`: Processed, transformed, and validated canonical records.
+- `this.excludedRecords`: Array of rows excluded by Ingestion Row Filters with itemized reasons.
 - `this.validationErrors`: Map of row and column errors with severity levels.
 - `this.activeFilter`: Current grid view filter (`'all'`, `'valid'`, `'errors'`).
 - `this.selectedRowIndices`: Set of row indices marked for bulk deletion.
@@ -54,50 +100,49 @@ The main wizard controller managing the 8-step pipeline, spreadsheet parsing, ce
 | `attemptAutoAdvance()` | Checks whether prerequisites for following steps are satisfied and advances the user automatically without unnecessary clicks. |
 | `handleFileUpload(file)` | Validates uploaded file MIME type and extension, checks provider expectations, and passes file to parser. |
 | `parseSpreadsheet(fileData)` | Uses SheetJS (`XLSX.read`) or PapaParse to parse raw bytes into rows. Detects password-protected workbooks. |
-| `decryptEncryptedWorkbook(file, password)` | Sends base64 workbook to the FastAPI Decryption Gateway and loads the returned decrypted workbook. |
-| `handleSheetStrategyModeChange()` | Greys out and disables sheet selection controls for flat files (CSV/TSV) with helpful tooltips. |
-| `populateSheetSelectionUI()` | Populates workbook worksheets and resolves active sheet based on strategy mode (First Sheet, Preset Name, Regex, or Date String Match to pick the latest date). |
+| `decryptEncryptedWorkbook(file, password)` | Sends base64 workbook to the Decryption Gateway and loads the returned decrypted workbook. |
 | `executeOffsetDetection()` | Scans the 2D raw data matrix to automatically find header rows and compute X/Y offset coordinates. |
-| `applyTransform(value, transformType, extra)` | Applies transforms (`TRIM`, `UPPERCASE`, `LOWERCASE`, `CAPITALIZE`, `DATE_FORMAT`) to a cell value. |
-| `runValidationPipeline()` | Iterates through rows, maps columns, applies transforms, evaluates validation rules, handles ignorable fallbacks to default values, and records diagnostics. |
-| `renderInteractiveGrid()` | Generates the Excel-like spreadsheet table in Step 8, complete with row checkboxes, error highlighting, and cell edit listeners. |
+| `evaluateRowFilters(rows)` | Evaluates multi-condition pre-validation filters (`=`, `!=`, `>`, `>=`, `<`, `<=`) to include or exclude rows. |
+| `evaluateCalculatedColumns(row)` | Evaluates tokenized formulas (e.g. `[sale_qty] * [sale_unit_price]`) to compute virtual columns dynamically. |
+| `applyTransform(value, transformConfig)` | Applies sequential transformation steps (`CAST_STRING`, `CAST_FLOAT`, `CAST_INTEGER`, `CAST_DATE`, `TRIM`, `UPPERCASE`, `LOWERCASE`). |
+| `runValidationPipeline()` | Maps columns, evaluates validation rules, handles ignorable fallbacks to default values, and records diagnostics. |
+| `renderInteractiveGrid()` | Generates the Excel-like spreadsheet table, complete with row checkboxes, error highlighting, and cell edit listeners. |
 | `setGridFilter(filterMode)` | Switches between `'all'`, `'valid'`, and `'errors'` row display modes without mutating underlying data. |
-| `handleMultiRowDelete()` | Deletes selected rows from `this.cleanRecords` and recalculates validation statistics. |
-| `toggleRuleSidebar()` | Expands or collapses the validation breakdown sidebar showing pass/fail counts by column. |
 | `exportCleanJSON()` | Formats and triggers download of the valid records as a formatted `.json` file. |
 | `exportCleanCSV()` | Generates RFC 4180 compliant CSV using PapaParse and triggers browser download. |
 | `exportCleanXLSX()` | Builds a new SheetJS workbook and exports a `.xlsx` file. |
+| `exportExcludedRowsCSV()` | Generates and downloads a `.csv` file of all filtered/excluded rows with their rejection reasons. |
 | `dispatchToApi()` | Sends a POST request with the clean dataset to the destination API endpoint using the configured Bearer token. |
-| `closeProject()` | Prompts to save dirty changes, resets all in-memory state, purges localStorage cache, strips URL appendages, and returns to Step 1. |
-| `clearProjectRouting()` | Purges project/hash keys from `localStorage` and removes hash (`#...`) and search query (`?...`) appendages from the browser address bar. |
-| `showSaveLayoutChangesModal()` | Prompts user when modifications were made to mappings/offsets to overwrite provider, update schema, or save as a new layout profile. |
-| `showPrivacyPolicyModal()` | Displays the modal explaining the zero-trust in-browser architecture, zero telemetry, and RAM isolation. |
+| `closeProject()` | Resets all in-memory state, purges localStorage cache, and returns to Step 1. |
 
 ---
 
-## 2. `app/assets/js/builder.js` (`UnravelBuilder`)
+## 2. `unravel-ui/assets/js/builder.js` (`UnravelBuilder`)
 
-The visual schema authoring engine powering the Dev Studio.
+The visual schema authoring engine powering Developer Studio.
 
 ### Core Methods
 
 | Method | Description |
 | :--- | :--- |
 | `init()` | Loads starter templates, initializes empty/cached schema, and renders Dev Studio panels. |
-| `loadStarterTemplates()` | Fetches `starter-templates.json` or falls back to built-in templates. |
-| `renderStarterTemplates()` | Renders template cards on the Dev Studio dashboard. |
-| `handleAutoScaffold(file)` | Parses an uploaded sample spreadsheet or CSV, samples column headers and types, and generates target columns and layout mappings. |
-| `renderTargetColumns()` | Renders the target schema table where developers define keys, labels, required flags, and default rules. |
-| `renderLayouts()` | Manages provider layout profiles, file type selections, sheet strategies, and header offset settings. |
-| `renderMappings()` | Generates column-by-column mapping controls, transformation selectors, date format inputs, and validation rule tags. |
-| `addValidationRule(targetKey, ruleType)` | Attaches a validation rule to a column mapping with custom arguments (e.g. regex patterns). |
+| `renderTargetColumns()` | Renders the target schema toolbar rows: Required toggle, Display Label, Default Value, Validations button, Transformations button, and Delete bin. |
+| `addNewTargetColumn()` | Appends a new target destination column and synchronizes layout mappings. |
+| `openValidationModal(colIdx)` | Configures default validation rules (`IsNHSNumber`, `IsPostcode`, `IsEmail`, `MatchRegex`, etc.) for a column. |
+| `openTransformModal(colIdx)` | Configures sequential type casting and string transformation pipelines for a column. |
+| `renderCalculatedColumns()` | Renders virtual formula field controls with bracketed token syntax (`[column_id]`). |
+| `renderRowFilters()` | Renders pre-validation ingestion filter conditions and logical combine mode (`AND` / `OR`). |
+| `pushHistory()` | Captures current schema state onto the undo stack and enables ribbon controls. |
+| `undo()` / `redo()` | Traverses schema modification history (`Ctrl+Z`, `Ctrl+Y`). |
+| `toggleJsonPreview()` | Collapses or expands the live JSON schema preview sidebar. |
+| `handleAutoScaffold(file)` | Parses an uploaded sample spreadsheet or CSV, samples column headers and types, and scaffolds target columns. |
 | `validateSchema()` | Diagnoses schema configuration for duplicate keys, missing IDs, or malformed slugs. |
 | `downloadJSON()` | Serializes current schema to JSON and triggers browser download. |
-| `launchInRunner()` | Saves schema to `localStorage` and redirects browser to `../index.html` with schema pre-loaded. |
+| `launchInRunner()` | Saves schema to `localStorage` and redirects browser to runner with schema pre-loaded. |
 
 ---
 
-## 3. `app/assets/js/security.js` (`UnravelSecurity`)
+## 3. `unravel-ui/assets/js/security.js` (`UnravelSecurity`)
 
 Client-side cryptographic vault implementing standard Web Crypto API primitives.
 
@@ -116,7 +161,7 @@ Client-side cryptographic vault implementing standard Web Crypto API primitives.
 
 ---
 
-## 4. `app/assets/js/validators.js` (`UnravelValidator`)
+## 4. `unravel-ui/assets/js/validators.js` (`UnravelValidator`)
 
 Zero-dependency validation rule engine.
 
@@ -137,18 +182,19 @@ Zero-dependency validation rule engine.
 
 ---
 
-## 5. `services/unravel_service.py`
+## 5. `unravel-service/unravel_service.py`
 
-Unified single-file FastAPI microservice for password-protected Excel workbook decryption, project schema hosting, headless validation parsing, live destination broker dispatching, and Bootswatch telemetry admin console.
+Independent FastAPI microservice for password-protected Excel workbook decryption, project schema hosting, headless validation parsing, and Bootswatch telemetry admin console.
 
 ### Key Endpoints
-- `GET /`: Operational status page displaying live uptime ("Up since...").
+- `GET /`: Operational status page displaying live uptime.
 - `GET /health`: Health-check endpoint returning service capabilities and database status.
-- `GET /admin`: Bootswatch-powered Admin Dashboard displaying telemetry stats, usage metrics, rule pain points, and audit logs.
+- `GET /admin`: Bootswatch Lumen Admin Dashboard displaying telemetry stats, usage metrics, and audit logs.
+- `POST /admin/projects/save`: Admin-only project schema creation and modification.
+- `POST /admin/projects/delete`: Admin-only project schema deletion.
+- `POST /admin/logs/purge`: Purges operational audit logs with confirmation.
 - `POST /api/decrypt-xlsx`: In-memory workbook decryption gateway via `msoffcrypto`.
 - `POST /api/decrypt-xlsx-hybrid`: Zero-trust hybrid encrypted decryption (RSA-OAEP + AES-GCM).
 - `GET /api/projects`: Public project schema retrieval repository.
-- `POST /api/parse`: Headless parsing & validation engine for automations.
-- `POST /api/broker/dispatch`: Zero-trust destination forwarder.
+- `POST /api/parse`: Headless parsing, row filtering, calculated field evaluation, and validation engine for automations.
 - `POST /api/telemetry/session`: Anonymized validation error logging.
-

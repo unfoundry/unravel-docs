@@ -14,10 +14,11 @@ Unlike traditional ETL solutions that require spinning up Python containers, bac
 - **Multi-Layout Supplier Profiles**: One schema supports multiple file formats and column names from different suppliers.
 - **Smart Offset & Header Detection**: Automatically identifies where header rows and data start, bypassing messy preamble rows or banners.
 - **Regex & Pattern Sheet Matching**: For Excel files, dynamically finds sheets based on name patterns, date formats, or preset identifiers.
-- **In-Memory Transformation Engine**: Trims strings, converts cases (uppercase, lowercase, capitalize), and transforms date formats across ISO/regional formats.
-- **Tolerant Validation Engine**: Categorizes errors into blocking errors and ignorable warnings with default-value fallbacks.
-- **Interactive Data Grid**: Excel-like spreadsheet experience with in-cell editing, multi-row deletion, quick filtering (All / Valid / Errors), and real-time rule success/failure counters.
-- **Flexible Export**: Clean JSON, normalized CSV, stylized Excel workbook, or direct REST API payload dispatch with custom Bearer tokens.
+- **Ingestion Row Filters**: Evaluates row-level conditions (`=`, `!=`, `>`, `>=`, `<`, `<=`) to include or exclude rows before validation.
+- **Calculated Virtual Columns**: Derives virtual formula fields using token expressions (e.g. `[sale_qty] * [sale_unit_price]` or ternary logic).
+- **Type Casting & Transformation Pipelines**: Chained transformations (`CAST_STRING`, `CAST_FLOAT`, `CAST_INTEGER`, `CAST_DATE`, `TRIM`, `UPPERCASE`, `LOWERCASE`).
+- **Interactive Data Grid**: Excel-like spreadsheet experience with in-cell editing, row exclusions, quick filtering (All / Valid / Errors), and real-time rule success/failure counters.
+- **Dual Export Strategy**: Export clean normalized datasets (JSON, CSV, stylized XLSX, or API dispatch) and download excluded rows with itemized rejection reasons.
 
 ---
 
@@ -40,42 +41,48 @@ Unravel shifts validation to the **point of ingestion**:
 
 ## 3. How It Works: The Ingestion Lifecycle
 
-Unravel operates as an 8-stage sequential wizard. The application continuously inspects the dataset state and automatically progresses through steps that require no user intervention:
+Unravel operates as a multi-stage sequential wizard. The application continuously inspects the dataset state and automatically progresses through steps that require no user intervention:
 
-```
-[1. Project Schema] ──► [2. Select Provider] ──► [3. Upload File] ──► [4. Select Sheet]
-                                                                             │
-[8. Review & Export] ◄── [7. Validate Rules] ◄── [6. Map Columns] ◄── [5. Offset Headers]
+```mermaid
+flowchart LR
+    S1["1. Schema & Vault"] --> S2["2. Provider Profile"]
+    S2 --> S3["3. File Upload"]
+    S3 --> S4["4. Sheet Selection"]
+    S4 --> S5["5. Header Offset"]
+    S5 --> S6["6. Column Mappings"]
+    S6 --> S7["7. Filters & Formulas"]
+    S7 --> S8["8. Validation Grid"]
+    S8 --> S9["9. Export / Dispatch"]
 ```
 
 ### High-Level Architecture Flow
 
 1. **Step 1: Project Metadata & Vault**: The user loads a declarative JSON schema defining target columns, data rules, and destination API details. The application initializes an optional browser AES-GCM vault.
 2. **Step 2: Provider Layout Profile**: Select the specific vendor or department format (e.g., "Supplier Standard XLSX" or "Partner CSV").
-3. **Step 3: File Upload & Validation**: The file is dropped or selected. Unravel checks file headers, verifies MIME types, and flags format discrepancies (e.g., if a CSV was provided when XLSX was expected). If the file is an encrypted Excel document, the optional Decryption Gateway modal is invoked (which transmits the file to your configured cloud or local endpoint; using this service is entirely optional).
-4. **Step 4: Worksheet Selection**: For multi-sheet Excel workbooks, the active sheet is selected manually or automatically resolved via regex, preset names, or the **Date String Match strategy (which parses sheet dates and picks the latest sheet)**. For flat CSV/TSV files, this step is automatically bypassed.
+3. **Step 3: File Upload & Validation**: The file is dropped or selected. Unravel checks file headers, verifies MIME types, and flags format discrepancies. If the file is an encrypted Excel document, the optional Decryption Gateway modal is invoked.
+4. **Step 4: Worksheet Selection**: For multi-sheet Excel workbooks, the active sheet is selected manually or automatically resolved via regex, preset names, or date string match strategies. Flat CSV/TSV files automatically bypass this step.
 5. **Step 5: Header Detection & Data Offset**: Preamble metadata or banner rows are skipped using automatic heuristics or manual row/column offsets.
-6. **Step 6: Column Mapping & Transforms**: Source columns are mapped to canonical target schema keys. Transformations (trim, casing, date reformatting) are configured.
-7. **Step 7: Rule Validation**: Target records are processed against validation rules (`NotEmpty`, `IsEmail`, `IsPostcode`, `IsPhoneNumber`, `IsInteger`, `MatchRegex`, `IsNHSNumber`). Ignorable failures fall back to default values.
-8. **Step 8: Grid Review & Ingestion**: Full Excel-like interactive grid. Filter by *All Rows*, *Valid Rows*, or *Errors Only*. Perform single or bulk deletions, edit cells directly, inspect the rule summary sidebar, and export.
+6. **Step 6: Column Translation & Mappings**: Source columns are mapped to canonical target schema keys using simple dropdown menus with auto-matched suggestions.
+7. **Step 7: Ingestion Filters & Calculated Fields**: Pre-validation filters isolate relevant rows, and formula fields compute virtual values (e.g. `[qty] * [unit_price]`).
+8. **Step 8: Rule Validation Grid**: Full Excel-like interactive grid. Filter by *All Rows*, *Valid Rows*, or *Errors Only*. Perform cell edits, review rule counters, and resolve errors.
+9. **Step 9: Review & Export**: Download all clean rows as XLSX, CSV, or JSON, download excluded rows with failure reasons, or dispatch payloads directly to the target API.
 
 ---
 
 ## 4. Running Unravel Locally
 
-Because Unravel is completely static, it requires no backend runtime. You can run it with any static web server:
+Because Unravel UI is completely static, it requires no backend runtime. You can run it with any static web server:
 
 ### Option A: Python Built-in Server
 ```bash
-# From the project root:
-cd app
+cd repos/unravel-ui
 python3 -m http.server 8080
 ```
 Open your browser at `http://localhost:8080`.
 
 ### Option B: Node.js (npx serve or http-server)
 ```bash
-cd app
+cd repos/unravel-ui
 npx serve .
 # or
 npx http-server -p 8080
@@ -83,7 +90,7 @@ npx http-server -p 8080
 
 ### Option C: Caddy / Nginx
 ```bash
-caddy file-server --root ./app --listen :8080
+caddy file-server --root ./repos/unravel-ui --listen :8080
 ```
 
 ---
@@ -92,4 +99,3 @@ caddy file-server --root ./app --listen :8080
 - Follow the **[User Guide](user-guide.md)** for an end-user walkthrough.
 - Read the **[Developer Guide](developer-guide.md)** to configure custom schemas.
 - Learn about the **[Privacy Policy & Security Model](privacy-policy.md)**.
-

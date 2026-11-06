@@ -14,6 +14,26 @@ Unlike conventional software-as-a-service (SaaS) ETL tools, **Unravel never tran
 
 All file parsing, column mappings, data transformations, and validation checks occur **exclusively in the RAM of the user's local web browser**.
 
+```mermaid
+flowchart TD
+    subgraph LocalSandbox ["Zero-Trust Client Boundary (Local RAM)"]
+        File["Uploaded Spreadsheet / CSV"]
+        Reader["In-RAM Parser & Validator Engine"]
+        Vault["Web Crypto AES-GCM Local Vault"]
+        Grid["Interactive Validation Grid"]
+        File --> Reader --> Grid
+        Vault -.-> Reader
+    end
+
+    subgraph External ["External (Strictly Out-of-Scope)"]
+        NoServer["No 3rd-Party Cloud Tracking"]
+        NoDB["No Intermediary Storage"]
+        NoCookies["No Marketing Cookies / Telemetry"]
+    end
+
+    LocalSandbox -.-x External
+```
+
 ---
 
 ## 2. Key Architectural Guarantees
@@ -25,7 +45,7 @@ When you open an Excel (`.xlsx`), CSV, or TSV file in Unravel, the file is read 
 Unravel contains **no telemetry scripts, no third-party tracking pixels, no Google Analytics, and no marketing cookies**. The application does not collect device fingerprints, IP addresses, usage statistics, or user behavior metrics.
 
 ### 3. Fully Offline & Air-Gapped Friendly
-All user interface dependencies (Bootstrap 5, SheetJS, PapaParse, SweetAlert2, Moment.js, and Bootstrap Icons) are bundled locally in the repository under `app/assets/vendor/`. The application makes zero CDN calls and requires no active Internet connection to function.
+All user interface dependencies (Bootstrap 5, SheetJS, PapaParse, SweetAlert2, Moment.js, and Bootstrap Icons) are bundled locally in the repository under `assets/vendor/`. The application makes zero CDN calls and requires no active Internet connection to function.
 
 ### 4. Client-Side Cryptographic Vault (Web Crypto AES-GCM)
 When you save custom schema layouts or project configurations locally in your browser, Unravel allows you to encrypt the state using the **W3C Web Crypto API**:
@@ -41,7 +61,7 @@ The only time Unravel makes an outbound network request is when you explicitly c
 - No intermediary proxy or tracking gateway is involved.
 
 ### 6. Optional Decryption Service Uses Cloud Transmission (Entirely Optional)
-If you choose to utilize the optional Python FastAPI Decryption Gateway (`services/unravel_service.py`) for password-protected Excel workbooks (`.xlsx`):
+If you choose to utilize the optional Python FastAPI Decryption Gateway (`repos/unravel-service/unravel_service.py`) for password-protected Excel workbooks (`.xlsx`):
 - **Cloud / Network Transmission**: When you submit a password to decrypt an encrypted file, the encrypted binary payload is transmitted over HTTP/HTTPS to the configured decryption service endpoint. In many enterprise deployments, this endpoint is hosted in the cloud or on a centralized remote server.
 - **Entirely Optional**: **Using this decryption service is completely optional.** Standard, unencrypted Excel files (`.xlsx`), CSV files, and TSV files do not use or contact this service under any circumstances. They remain 100% inside your local web browser RAM.
 - **In-Memory Decryption**: When the decryption gateway receives an encrypted file, it processes the byte stream strictly inside ephemeral Python `io.BytesIO` RAM buffers using `msoffcrypto-tool`. Decrypted bytes are returned directly to the browser and are never written to physical disk.
@@ -74,4 +94,3 @@ Because Unravel is delivered as readable, unminified JavaScript and CSS, your or
 
 ## 5. Contact & Support
 For security questions or architecture reviews, consult your enterprise data governance team or review the project's open codebase.
-

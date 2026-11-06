@@ -38,47 +38,34 @@ Hybrid encryption is the standard used by PGP/GPG, JSON Web Encryption (JWE / RF
 4. **Key Wrapping**: The browser encrypts the 32-byte AES key using the server's RSA public key (`RSA-OAEP` with SHA-256).
 5. **Transit & Decryption**: The server uses its RSA private key to unwrap the AES session key, decrypts the payload with AES-GCM, performs in-memory Excel decryption via `msoffcrypto`, and re-encrypts the result using the same AES key before returning it.
 
-```
-┌─────────────────────────────────┐                       ┌─────────────────────────────────┐
-│     User Browser (Unravel)      │                       │     FastAPI Decryption Proxy    │
-└────────────────┬────────────────┘                       └────────────────┬────────────────┘
-                 │                                                         │
-                 │ 1. GET /api/public-key                                  │
-                 ├────────────────────────────────────────────────────────►│
-                 │ 2. Return Server RSA Public Key (SPKI-PEM)              │
-                 │◄────────────────────────────────────────────────────────┤
-                 │                                                         │
- [Generate 256-bit AES-GCM key]                                            │
- [AES-GCM encrypt {file, password}]                                        │
- [RSA-OAEP wrap AES key]                                                   │
-                 │                                                         │
-                 │ 3. POST /api/decrypt-xlsx-hybrid                        │
-                 │    { encryptedKey, encryptedPayload, iv }               │
-                 ├────────────────────────────────────────────────────────►│
-                 │                                                         │ [RSA-OAEP unwrap AES key]
-                 │                                                         │ [AES-GCM decrypt payload]
-                 │                                                         │ [In-memory msoffcrypto]
-                 │                                                         │ [AES-GCM encrypt output]
-                 │ 4. 200 OK { encryptedPayload, iv }                      │
-                 │◄────────────────────────────────────────────────────────┤
-                 │                                                         │
- [AES-GCM decrypt workbook]                                                │
- [In-RAM SheetJS parsing]                                                  ▼
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Browser as User Web Browser
+    participant Gateway as Unravel Service Gateway
+
+    Browser->>Gateway: GET /api/public-key
+    Gateway-->>Browser: Return Server RSA Public Key (SPKI-PEM)
+    Note over Browser: 1. Generate random 256-bit AES-GCM key<br/>2. Encrypt spreadsheet bytes & password with AES-GCM<br/>3. Wrap AES key with Server RSA Public Key (RSA-OAEP)
+    Browser->>Gateway: POST /api/decrypt-xlsx-hybrid<br/>{ encryptedKey, encryptedPayload, iv }
+    Note over Gateway: 1. Unwrap AES key using Server RSA Private Key<br/>2. Decrypt payload with AES-GCM<br/>3. Decrypt Excel container in-memory via msoffcrypto<br/>4. Re-encrypt clean XLSX with same AES key
+    Gateway-->>Browser: 200 OK: { encryptedPayload, iv }
+    Note over Browser: Decrypt returned workbook into browser RAM<br/>Load into SheetJS in memory
 ```
 
 ---
 
 ## 3. Requirements & Installation
 
-The gateway is located at `services/unravel_service.py`.
+The gateway is located at `repos/unravel-service/unravel_service.py`.
 
 ### Prerequisites
 - Python 3.9+
-- Dependencies listed in `services/requirements.txt`:
+- Dependencies listed in `repos/unravel-service/requirements.txt`:
   ```bash
-  pip install -r services/requirements.txt
+  cd repos/unravel-service
+  pip install -r requirements.txt
   ```
-  *(Installs `fastapi`, `uvicorn`, `msoffcrypto-tool`, `pydantic`, `cryptography`, `openpyxl`, and `ldap3`)*
 
 ---
 
@@ -86,16 +73,14 @@ The gateway is located at `services/unravel_service.py`.
 
 ### Development Mode
 ```bash
-python3 services/unravel_service.py
+cd repos/unravel-service
+python3 unravel_service.py
 ```
-Or with `uvicorn`:
-```bash
-uvicorn services.unravel_service:app --host 127.0.0.1 --port 8001 --reload
-```
+Service runs on `http://127.0.0.1:8000`.
 
 ### Health Check
 ```bash
-curl http://127.0.0.1:8001/health
+curl http://127.0.0.1:8000/health
 ```
 Response:
 ```json

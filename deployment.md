@@ -1,6 +1,6 @@
 # Deployment Guide
 
-**Unravel** consists purely of client-side static assets (HTML, CSS, JavaScript, and SVG icons). It has **zero server-side runtime dependencies** and **zero external CDN calls**.
+**Unravel UI** consists purely of client-side static assets (HTML, CSS, JavaScript, and SVG icons). It has **zero server-side runtime dependencies** and **zero external CDN calls**.
 
 This architecture simplifies deployment, ensures zero maintenance downtime, and allows installation in air-gapped, high-security enterprise intranets.
 
@@ -8,43 +8,45 @@ This architecture simplifies deployment, ensures zero maintenance downtime, and 
 
 ## 1. Hosting Architecture Overview
 
-```
-                      ┌──────────────────────────────────────┐
-                      │    Static Web Server / CDN Bucket    │
-                      │   (Nginx / S3 / Vercel / Cloudflare)  │
-                      └──────────────────┬───────────────────┘
-                                         │  (Only delivers HTML/JS/CSS)
-                                         ▼
-                               ┌───────────────────┐
-                               │  User Web Browser │
-                               │  ┌─────────────┐  │
-                               │  │ In-RAM App  │  │ (No raw file or data
-                               │  └─────────────┘  │  ever reaches web server)
-                               └─────────┬─────────┘
-                                         │
-        (Optional direct REST dispatch)  │  (Optional password decrypt)
-                                         ▼                             ▼
-                      ┌───────────────────────┐    ┌────────────────────────┐
-                      │ Enterprise REST API   │    │ XLSX Decryptor Gateway │
-                      │ (e.g. Ingestion API)  │    │ (FastAPI, Port 8001)   │
-                      └───────────────────────┘    └────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Hosting ["Static Delivery Layer"]
+        CDN["Static Web Server / CDN / S3 / Nginx<br/>(Delivers HTML, JS, CSS, SVG)"]
+    end
+
+    subgraph Client ["Client Device (Browser Sandbox)"]
+        Browser["User Web Browser"]
+        RAM["In-RAM Unravel Engine<br/>- SheetJS / PapaParse Parsers<br/>- Ingestion Row Filters<br/>- Calculated Formula Columns<br/>- Rule Validation Grid"]
+        Browser --- RAM
+    end
+
+    subgraph Backend ["Optional Enterprise Services"]
+        API["Enterprise Destination API<br/>(POST clean JSON / CSV)"]
+        Service["Unravel Service Gateway<br/>(XLSX Decryption & Headless Pipeline)"]
+    end
+
+    CDN -->|"1. Static Assets Download"| Browser
+    RAM -->|"2. Clean Records Dispatch (Optional)"| API
+    RAM <-->|"3. In-Memory Decrypt (Optional)"| Service
 ```
 
 ---
 
 ## 2. Docker Deployment
 
-A lightweight Nginx Alpine container provides an ideal containerized deployment.
+### Unravel UI (Static Frontend)
 
-### `Dockerfile`
+A lightweight Nginx Alpine container provides an ideal containerized deployment for `unravel-ui`.
+
+#### `Dockerfile`
 ```dockerfile
 FROM nginx:alpine
 
 # Remove default nginx welcome page
 RUN rm -rf /usr/share/nginx/html/*
 
-# Copy Unravel app static files
-COPY app /usr/share/nginx/html
+# Copy Unravel UI static files
+COPY . /usr/share/nginx/html
 
 # Expose web port
 EXPOSE 80
@@ -52,12 +54,23 @@ EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
 ```
 
-### Build & Run
+#### Build & Run
 ```bash
-docker build -t unravel-app:latest .
-docker run -d -p 8080:80 --name unravel unravel-app:latest
+cd repos/unravel-ui
+docker build -t unravel-ui:latest .
+docker run -d -p 8080:80 --name unravel-ui unravel-ui:latest
 ```
 Access the application at `http://localhost:8080`.
+
+### Unravel Service (Backend & Decryption Gateway)
+
+The companion Python service includes its own `Dockerfile` and `docker-compose.yml`:
+
+```bash
+cd repos/unravel-service
+docker compose up -d --build
+```
+Access service health and the Admin Dashboard at `http://localhost:8000`.
 
 ---
 
@@ -69,7 +82,7 @@ Below is a production-grade Nginx configuration with strict HTTP security header
 server {
     listen 80;
     server_name unravel.yourdomain.internal;
-    root /var/www/unravel/app;
+    root /var/www/unravel-ui;
     index index.html;
 
     # Gzip Compression
@@ -83,7 +96,7 @@ server {
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     
     # Strict Content Security Policy (No external CDN dependencies)
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self' http://localhost:8001 https:;" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self' http://localhost:8000 https:;" always;
 
     # Cache static assets
     location ~* \.(css|js|woff2?|svg|png|jpg|ico)$ {
@@ -104,32 +117,31 @@ server {
 
 ### AWS S3 + CloudFront
 1. Create an S3 bucket configured for Static Website Hosting.
-2. Sync the `app/` folder:
+2. Sync the `unravel-ui/` files:
    ```bash
-   aws s3 sync ./app s3://my-unravel-bucket --delete
+   aws s3 sync ./repos/unravel-ui s3://my-unravel-bucket --delete
    ```
 3. Attach a CloudFront distribution with an SSL certificate.
 
 ### Vercel
-Create a `vercel.json` in the root:
+Create a `vercel.json` in `unravel-ui`:
 ```json
 {
   "version": 2,
-  "public": false,
   "cleanUrls": true,
   "routes": [
-    { "src": "/builder/(.*)", "dest": "/app/builder/$1" },
-    { "src": "/assets/(.*)", "dest": "/app/assets/$1" },
-    { "src": "/(.*)", "dest": "/app/$1" }
+    { "src": "/builder/(.*)", "dest": "/builder/$1" },
+    { "src": "/assets/(.*)", "dest": "/assets/$1" },
+    { "src": "/(.*)", "dest": "/$1" }
   ]
 }
 ```
 
 ### Netlify
-Create a `netlify.toml` in the root:
+Create a `netlify.toml` in `unravel-ui`:
 ```toml
 [build]
-  publish = "app"
+  publish = "."
 ```
 
 ---
@@ -137,7 +149,6 @@ Create a `netlify.toml` in the root:
 ## 5. Air-Gapped & Offline Deployment
 
 Unravel is **100% self-contained**:
-- All vendor libraries (`bootstrap`, `sheetjs`, `papaparse`, `sweetalert2`, `moment`, `bootstrap-icons`) reside under `app/assets/vendor/`.
-- No Google Fonts, CDN scripts, or external telemetry pings are made.
-- Can be copied onto a USB flash drive or air-gapped subnet and opened directly via `file:///path/to/app/index.html` or a local intranet web server.
-
+- All vendor libraries (`bootstrap`, `sheetjs`, `papaparse`, `sweetalert2`, `moment`, `bootstrap-icons`) reside under `assets/vendor/`.
+- No Google Fonts, external CDN scripts, or third-party telemetry pings are made.
+- Can be copied onto a USB flash drive or air-gapped subnet and opened directly via `file:///path/to/unravel-ui/index.html` or a local intranet web server.
