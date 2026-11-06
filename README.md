@@ -1,5 +1,7 @@
 # Unravel Documentation
 
+[![VitePress Deployment](https://github.com/unfoundry/unravel-docs/actions/workflows/deploy.yml/badge.svg)](https://github.com/unfoundry/unravel-docs/actions/workflows/deploy.yml)
+
 Welcome to the comprehensive documentation suite for **Unravel** — the client-side, zero-trust tabular data ingestion, rule validation, and normalization platform for Excel (XLSX), CSV, and TSV files.
 
 ---
